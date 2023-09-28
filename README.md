@@ -10,6 +10,9 @@ Data set: https://huggingface.co/datasets/multi_woz_v2i (i=2,3,4)
 
 
 ## Approach:
-  - **Dialog Act Prediction Model**: A classification model that takes user utterance as input and predicts the dialog act. This could be an LSTM or Transformer-based model. (Classification)   
+  - **Dialog Act Prediction Model**: A classification model that takes user utterance as input and predicts the dialog act. This could be an LSTM or Transformer-based model. (Classification)
+    - Classifies the type of action the user is attempting to perform (e.g., asking a question, making a statement).    
   - **Semantic Slot Filling Model**: This could be a sequence-to-sequence model or a named entity recognition (NER) model. (Classification)
+    - Extracts key pieces of information (e.g., date, location) from the user's utterance.
   - **Agent Move Prediction Model**: Use reinforcement learning or rule-based methods to decide the agent's next move based on the dialog history and current state. (Reinforcement Learning)
+    - Determines the next action the conversational agent should take (e.g., provide information, ask for clarification).     
