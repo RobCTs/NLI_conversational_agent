@@ -7,3 +7,9 @@
   • Agent move prediction
 
 Data set: https://huggingface.co/datasets/multi_woz_v2i (i=2,3,4)
+
+
+## Approach:
+  - **Dialog Act Prediction Model**: A classification model that takes user utterance as input and predicts the dialog act. This could be an LSTM or Transformer-based model. (Classification)   
+  - **Semantic Slot Filling Model**: This could be a sequence-to-sequence model or a named entity recognition (NER) model. (Classification)
+  - **Agent Move Prediction Model**: Use reinforcement learning or rule-based methods to decide the agent's next move based on the dialog history and current state. (Reinforcement Learning)
