@@ -32,3 +32,7 @@ Going back do DistilBert Uncased form the Best Model Parameters (83.6% Accuracy)
 
 08/10/2023 17:30 (Bernardo) - Accuracy on Distilled Bert Uncased with a max sequence length of 128 with 64 batches and 14 epochs is 82.9% on the test data with learning rate to 2e-6. Adding a Dropout Layer with 30% dropout and a fully connected pre classification linear layer.
 
+09/10/2023 15:10 (Everyone) - Accuracy on Distilled Bert Uncased with a max sequence length of 256 with 64 batches and 10 epochs is 83.7% on the test data with learning rate to 5e-6. Overfits around epoch 4.
+---> NEW BEST!
+
+09/10/2023 XX:XX (Bernardo) - Using Scheduler.
