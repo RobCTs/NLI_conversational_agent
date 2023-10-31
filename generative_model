@@ -1,0 +1,182 @@
+pip install transformers torch nltk datasets
+
+import tensorflow as tf
+import numpy as np
+from datasets import load_dataset
+import gensim
+
+# Load the Train, Validation and Test data
+dataset = load_dataset("multi_woz_v22")
+train_data = dataset['train']
+val_data = dataset['validation']
+test_data = dataset['test']
+
+def filter_and_preprocess(data):
+    """
+    Filters a list of dictionaries by only including entries with services
+    either "restaurant" or "hotel" and having only one service.
+
+    Parameters:
+    - data: list of dictionaries containing a "services" key, which is a list of services.
+
+    Returns:
+    - List of filtered dictionaries.
+    """
+    return [entry for entry in data if set(entry["services"]).issubset({"restaurant", "hotel"}) and len(entry["services"]) == 1]
+
+# Only keep dialogues related to Restaurants XOR Hotels.
+train_data_filtered = filter_and_preprocess(train_data)
+val_data_filtered = filter_and_preprocess(val_data)
+test_data_filtered = filter_and_preprocess(test_data)
+
+def extract_dialogues(data):
+    dialogues = []
+    for entry in data:
+        turns = entry['turns']['utterance']
+        dialogue = ' '.join(turns)
+        dialogues.append(dialogue)
+    return dialogues
+
+def save_to_txt(data, filename):
+  with open(filename, 'w') as f:
+    for turn in data['turns']['utterance']:
+      f.write(turn + '\n')
+
+class ConversationalAgent:
+#provided we have the models for the domain, slot filler and dialogue act predictor
+    def __init__(self, model, tokenizer, domain_classifier, slot_filler, dialogue_act_predictor):
+        self.model = model
+        self.tokenizer = tokenizer
+        self.domain_classifier = domain_classifier
+        self.slot_filler = slot_filler
+        self.dialogue_act_predictor = dialogue_act_predictor
+        self.context = ""
+
+    def get_domain(self, text):
+      # Assuming domain_classifier is a function that takes text and returns a domain
+        try:
+            domain = self.domain_classifier(text)
+            if not domain:
+                raise ValueError("Domain could not be identified.")
+            return domain
+        except Exception as e:
+            print(f"Error in domain classification: {str(e)}")
+            return None
+
+    def get_slots(self, text, domain):
+      # Assuming slot_filler is a function that takes text and a domain, and returns slots
+        if domain is None:
+            return None
+        try:
+            slots = self.slot_filler(text, domain)
+            return slots
+        except Exception as e:
+            print(f"Error in slot filling: {str(e)}")
+            return None
+
+    def get_dialogue_act(self, text):
+      # Assuming dialogue_act_predictor is a function that takes text and returns a dialogue act
+        try:
+            dialogue_act = self.dialogue_act_predictor(text)
+            if not dialogue_act:
+                raise ValueError("Dialogue act could not be identified.")
+            return dialogue_act
+        except Exception as e:
+            print(f"Error in dialogue acts prediction: {str(e)}")
+            return None
+
+    def generate_response(self, text):
+        if not text.strip():
+            print("Error: Empty user input received.")
+            return "I'm sorry, I didn't catch that. Could you please repeat?"
+
+        domain = self.get_domain(text)
+        slots = self.get_slots(text, domain)
+        dialogue_act = self.get_dialogue_act(text)
+
+        if domain is None or slots is None or dialogue_act is None:
+            return "I'm sorry, I'm having trouble understanding that. Could you please rephrase?"
+
+        # Add the extracted information to the context
+        self.context += f"Domain: {domain}\n"
+        self.context += f"Slots: {slots}\n"
+        self.context += f"Dialogue Act: {dialogue_act}\n"
+        self.context += f"User: {text}\n"
+
+        # Generate the response using GPT
+        try:
+            inputs = self.tokenizer.encode(self.context, return_tensors='pt')
+            outputs = self.model.generate(inputs, max_length=150, num_beams=5, no_repeat_ngram_size=2, early_stopping=True)
+            response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        except Exception as e:
+            print(f"Error in response generation: {str(e)}")
+            return "I'm sorry, I'm having some technical issues. Could you please try again?"
+
+        self.context += f"Agent: {response}\n"
+        return response
+
+from transformers import GPT2Tokenizer, TextDataset, DataCollatorForLanguageModeling
+
+#preparing for the language model
+tokenizer = GPT2Tokenizer.from_pretrained('gpt2-medium')
+tokenizer.pad_token = tokenizer.eos_token
+
+train_dialogues = extract_dialogues(train_data_filtered)
+val_dialogues = extract_dialogues(val_data_filtered)
+
+save_to_txt(train_dialogues, 'train.txt')
+save_to_txt(val_dialogues, 'val.txt')
+
+train_dataset = TextDataset(tokenizer=tokenizer, file_path='train.txt', block_size=128)
+val_dataset = TextDataset(tokenizer=tokenizer, file_path='val.txt', block_size=128)
+
+data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
+
+print(train_dialogues)
+# only utterances
+print(train_dataset[:10])
+
+#the actual model
+model = GPT2LMHeadModel.from_pretrained('gpt2-medium')
+
+training_args = TrainingArguments(
+    output_dir='./results',
+    overwrite_output_dir=True,
+    num_train_epochs=3,
+    per_device_train_batch_size=32,
+    logging_dir='./logs',  # directory for storing logs
+    logging_steps=100,  # log & save weights each logging_steps
+    save_steps=10_000,
+    evaluation_strategy=IntervalStrategy.STEPS,  # "steps"
+    eval_steps=500,  # evaluation and Save happens every 500 steps
+    save_total_limit=5,  # only last 5 models are saved
+    load_best_model_at_end=True,  # load the best model when finished training (default metric is loss)
+    metric_for_best_model='loss',  # use loss to evaluate best model
+    greater_is_better=False,  # whether a bigger metric is better or worse (default is False - smaller is better)
+)
+
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    data_collator=data_collator,
+    train_dataset=train_dataset,
+    eval_dataset=val_dataset,
+)
+
+# Train the model
+trainer.train()
+#can't solve the problem with accelerator.............
+
+# domain_classifier = ...
+# slot_filler = ...
+# dialogue_act_predictor = ...
+
+agent = ConversationalAgent(model, tokenizer, domain_classifier, slot_filler, dialogue_act_predictor)
+
+while True:
+    user_input = input("User: ")
+    if user_input.lower() == 'exit':
+        print("Agent: Goodbye!")
+        break
+    response = agent.generate_response(user_input)
+    print("Agent:", response)
