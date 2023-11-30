@@ -134,6 +134,40 @@ class SlotFillingDataset:
                 labelled_data.append((encoded, labels))
 
         return labelled_data
+    
+    def create_labelled_dialogue_data(self, dataset):
+        """
+        Creates the labelled data in the format (utterance, {slots, values}) for each dialogue.
+        :param dataset: Dataset to create the labelled data from.
+        """
+        labelled_data = []
+
+        for dialogue in dataset:
+            turns = dialogue["turns"]
+            dialogue_data = []
+            for i, _ in enumerate(turns["turn_id"]):
+                utterance = turns["utterance"][i]
+                slot_values = {}
+
+                # If the turn has dialogue acts, extract slots and values
+                if "dialogue_acts" in turns and i < len(turns["dialogue_acts"]):
+                    act = turns["dialogue_acts"][i]
+                    span_info = act.get("span_info", {})
+
+                    for act_slot_name, act_slot_value in zip(
+                        span_info.get("act_slot_name", []),
+                        span_info.get("act_slot_value", [])
+                    ):
+                        slot_values[act_slot_name] = act_slot_value
+
+                # Append the utterance and extracted slot values to the dialogue data
+                dialogue_data.append((utterance, slot_values))
+            
+            # Add each complete dialogue to the labelled data
+            labelled_data.append(dialogue_data)
+
+        return labelled_data
+
 
     def create_label2id(self, labelled_data):
         """
