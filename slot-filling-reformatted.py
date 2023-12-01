@@ -478,9 +478,74 @@ class SlotFillingModel:
             last_word_end = word_end
 
         return word_labels
+    
+    def query_slots(self, utterance):
+        if not self.model:
+            print("Model not created.")
+            return
 
+        self.model.eval()
+        with torch.no_grad():
+            encoded_input = self.tokenizer(
+                utterance,
+                add_special_tokens=True,
+                return_offsets_mapping=True,
+                padding="max_length",
+                truncation=True,
+                max_length=self.max_length,
+                return_tensors="pt",
+            )
 
-if __name__ == "__main__":
+        # Move tensors to the correct device
+        input_ids = encoded_input["input_ids"].to(self.device)
+        attention_masks = encoded_input["attention_mask"].to(self.device)
+
+        # Forward pass
+        with torch.no_grad():
+            outputs = self.model(input_ids, attention_mask=attention_masks)
+            logits = outputs.logits
+            logits = logits.detach().cpu()
+
+        # Use logits and id2label to get the predicted labels
+        predictions = torch.argmax(logits, dim=2).squeeze().tolist()
+        offset_mapping = encoded_input["offset_mapping"].squeeze().tolist()
+        tokens = self.tokenizer.convert_ids_to_tokens(input_ids.squeeze().tolist())
+
+        # Extracting slot values from the utterance
+        slot_values = {}
+        current_slot = None
+        current_value = ""
+
+        for token, label_id, (word_start, word_end) in zip(tokens, predictions, offset_mapping):
+            label = self.id2label.get(label_id, "O")
+
+            if label.startswith("B-"):
+                # Save the previous slot and value if any
+                if current_slot:
+                    slot_values[current_slot] = current_value.strip()
+                
+                current_slot = label[2:]  # Remove the 'B-' prefix
+                current_value = utterance[word_start:word_end]
+
+            elif label.startswith("I-") and current_slot:
+                current_value += " " + utterance[word_start:word_end]
+
+            elif label == "O":
+                # Save the previous slot and value if any
+                if current_slot:
+                    slot_values[current_slot] = current_value.strip()
+                    current_slot = None
+                    current_value = ""
+
+        # Save the last found slot and value
+        if current_slot:
+            slot_values[current_slot] = current_value.strip()
+
+        return slot_values
+
+    
+
+def train_and_test_model():
     # Create the dataset
     dataset = SlotFillingDataset()
     # Load the dataset
@@ -528,3 +593,54 @@ if __name__ == "__main__":
     # Query the model
     res = model.query("I want to book a table for 4 people at 7pm tonight.")
     print(res)
+
+if __name__ == "__main__":
+    
+    # Create dialogues dataset'
+    dataset = SlotFillingDataset()
+    # Load the dataset
+    dataset.load()
+    # Filter the dataset
+    dataset.get_relevant_data({"restaurant", "hotel"})
+    # Create the labelled training data
+    labelled_data = dataset.create_labelled_data(dataset.train_dataset)
+    # Create the labelled validation data
+    labelled_data_val = dataset.create_labelled_data(dataset.val_dataset)
+    # Create the labelled test data
+    labelled_data_test = dataset.create_labelled_data(dataset.test_dataset)
+    # Create the label2id mapping
+    label2id, num_labels = dataset.create_label2id(labelled_data)
+    # Create the TensorDataset for training
+    tensor_dataset_train = TensorDataset(labelled_data, label2id)
+    tensor_dataset_train.create_tensors()
+    # Create the TensorDataset for validation
+    tensor_dataset_val = TensorDataset(labelled_data_val, label2id)
+    tensor_dataset_val.create_tensors()
+    # Create the TensorDataset for test
+    tensor_dataset_test = TensorDataset(labelled_data_test, label2id)
+    tensor_dataset_test.create_tensors()
+    # Create the dataloader for training
+    train_dataloader = tensor_dataset_train.create_dataloader()
+    # Create the dataloader for validation
+    val_dataloader = tensor_dataset_val.create_dataloader()
+    # Create the dataloader for test
+    test_dataloader = tensor_dataset_test.create_dataloader()
+    # Create the model
+    dialogue_data = dataset.create_labelled_dialogue_data(dataset.test_dataset)
+    # create model from checkpoint
+    model = SlotFillingModel(
+    train_dataloader,
+    val_dataloader,
+    test_dataloader,
+    dataset.tokenizer,
+    num_labels,
+    label2id,
+    dataset.id2label(label2id),
+)
+    model.create_model()
+    model.model.load_state_dict(torch.load("checkpoint_epoch_3.pt"))
+    model.model.eval()
+    # Query the model
+    res = model.query_slots("I want to book a table for 4 people at 7pm tonight.")
+    print(res)
+    
