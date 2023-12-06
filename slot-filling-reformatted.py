@@ -11,6 +11,7 @@ from tqdm.auto import tqdm
 # PyTorch imports for model training and utilities
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import Dataset
 
 # Hugging Face Transformers for BERT models and tokenization
@@ -196,19 +197,37 @@ class SentenceBasedSlotExtractor:
             return data_loader, mlb, mlb.classes_
 
 
+    class Attention(nn.Module):
+        def __init__(self, hidden_size):
+            super(SentenceBasedSlotExtractor.Attention, self).__init__()
+            self.hidden_size = hidden_size
+            self.attention = nn.Linear(hidden_size, 1)
+
+        def forward(self, encoder_outputs):
+            attention_weights = F.softmax(self.attention(encoder_outputs), dim=1)
+            context_vector = attention_weights * encoder_outputs
+            context_vector = torch.sum(context_vector, dim=1)
+            return context_vector, attention_weights
+
+
     class SlotFillingModel(nn.Module):
         def __init__(self, num_labels, bert_model_type="bert-base-uncased"):
-            super(SentenceBasedSlotExtractor.SlotFillingModel, self).__init__()
+            super().__init__()
             self.bert = BertModel.from_pretrained(bert_model_type)
-            self.fc = nn.Linear(768, num_labels)
+            self.attention = SentenceBasedSlotExtractor.Attention(self.bert.config.hidden_size)
+            self.fc = nn.Linear(self.bert.config.hidden_size, num_labels)
 
         def forward(self, input_ids, attention_mask):
-            outputs = self.bert(input_ids, attention_mask=attention_mask)
-            cls_output = outputs.last_hidden_state[
-                :, 0, :
-            ]  # selects the [CLS] token position.
-            logits = torch.sigmoid(self.fc(cls_output))
+            bert_outputs = self.bert(input_ids, attention_mask=attention_mask)
+            sequence_output = bert_outputs.last_hidden_state  # (batch_size, sequence_length, hidden_size)
+
+            # Apply attention
+            context_vector, attention_weights = self.attention(sequence_output)
+
+            # Pass the context vector to the final classifier
+            logits = torch.sigmoid(self.fc(context_vector))
             return logits
+
     
     class Utils:
         def train_model(model, train_loader, val_loader):
