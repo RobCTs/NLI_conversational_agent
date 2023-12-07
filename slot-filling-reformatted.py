@@ -27,13 +27,18 @@ from sklearn.preprocessing import MultiLabelBinarizer
 
 # Evaluation metrics
 from seqeval.metrics import classification_report as seqeval_classification_report
-from sklearn.metrics import multilabel_confusion_matrix as mcm, classification_report
+from sklearn.metrics import (
+    multilabel_confusion_matrix as mcm,
+    classification_report,
+    f1_score,
+)
+
 
 # Hugging Face Datasets for loading datasets
 from datasets import load_dataset
 
+
 class SentenceBasedSlotExtractor:
-    
     class SlotFillingDataset:
         def __init__(
             self,
@@ -122,19 +127,27 @@ class SentenceBasedSlotExtractor:
                             ):
                                 if slot_name == "none":
                                     continue
-                                
+
                                 # check that the slot is not in span_info
                                 span_info = act.get("span_info", {})
-                                span_info_slot_names = span_info.get("act_slot_name", [])
-                                span_info_slot_values = span_info.get("act_slot_value", [])
-                                if slot_name in span_info_slot_names and slot_value in span_info_slot_values:
+                                span_info_slot_names = span_info.get(
+                                    "act_slot_name", []
+                                )
+                                span_info_slot_values = span_info.get(
+                                    "act_slot_value", []
+                                )
+                                if (
+                                    slot_name in span_info_slot_names
+                                    and slot_value in span_info_slot_values
+                                ):
                                     continue
-                                
 
                                 slot_value_pairs.append((slot_name, slot_value))
                                 dialogue_acts_str += f"{da}|"
 
-                    labelled_data.append((dialogue_acts_str + utterance, slot_value_pairs))
+                    labelled_data.append(
+                        (dialogue_acts_str + utterance, slot_value_pairs)
+                    )
 
             return labelled_data
 
@@ -144,7 +157,7 @@ class SentenceBasedSlotExtractor:
             bert_model_name="bert-base-uncased",
             batch_size=32,
             num_workers=4,
-            mlb = None
+            mlb=None,
         ):
             # Initialize BERT tokenizer
             tokenizer = BertTokenizer.from_pretrained(bert_model_name)
@@ -160,7 +173,7 @@ class SentenceBasedSlotExtractor:
                     text,
                     add_special_tokens=True,
                     max_length=128,
-                    padding = 'max_length',
+                    padding="max_length",
                     return_attention_mask=True,
                     return_tensors="pt",
                 )
@@ -173,7 +186,7 @@ class SentenceBasedSlotExtractor:
                 labels.append([slot_name for slot_name, _ in slot_value_pairs])
 
             # Initialize and fit MultiLabelBinarizer
-            
+
             if mlb is None:
                 mlb = MultiLabelBinarizer()
                 mlb.fit(labels)
@@ -188,14 +201,15 @@ class SentenceBasedSlotExtractor:
             input_ids = torch.cat(input_ids, dim=0)
             attention_masks = torch.cat(attention_masks, dim=0)
 
-            dataset = torch.utils.data.TensorDataset(input_ids, attention_masks, label_tensors)
+            dataset = torch.utils.data.TensorDataset(
+                input_ids, attention_masks, label_tensors
+            )
 
             data_loader = torch.utils.data.DataLoader(
                 dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True
             )
 
             return data_loader, mlb, mlb.classes_
-
 
     class Attention(nn.Module):
         def __init__(self, hidden_size):
@@ -209,17 +223,20 @@ class SentenceBasedSlotExtractor:
             context_vector = torch.sum(context_vector, dim=1)
             return context_vector, attention_weights
 
-
     class SlotFillingModel(nn.Module):
         def __init__(self, num_labels, bert_model_type="bert-base-uncased"):
             super().__init__()
             self.bert = BertModel.from_pretrained(bert_model_type)
-            self.attention = SentenceBasedSlotExtractor.Attention(self.bert.config.hidden_size)
+            self.attention = SentenceBasedSlotExtractor.Attention(
+                self.bert.config.hidden_size
+            )
             self.fc = nn.Linear(self.bert.config.hidden_size, num_labels)
 
         def forward(self, input_ids, attention_mask):
             bert_outputs = self.bert(input_ids, attention_mask=attention_mask)
-            sequence_output = bert_outputs.last_hidden_state  # (batch_size, sequence_length, hidden_size)
+            sequence_output = (
+                bert_outputs.last_hidden_state
+            )  # (batch_size, sequence_length, hidden_size)
 
             # Apply attention
             context_vector, attention_weights = self.attention(sequence_output)
@@ -228,19 +245,20 @@ class SentenceBasedSlotExtractor:
             logits = torch.sigmoid(self.fc(context_vector))
             return logits
 
-    
     class Utils:
         def train_model(model, train_loader, val_loader):
-            
-            
-            device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+            device = (
+                torch.device("cuda")
+                if torch.cuda.is_available()
+                else torch.device("cpu")
+            )
             optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
             criterion = nn.BCELoss()
             best_val_loss = float("inf")
             model.to(device)
             for epoch in range(6):
                 model.train()
-                
+
                 train_loss = 0.0
                 for batch in train_loader:
                     input_ids, attention_mask, labels = batch
@@ -248,31 +266,30 @@ class SentenceBasedSlotExtractor:
                     attention_mask = attention_mask.to(device)
                     labels = labels.to(device)
 
-                    
                     # Zero the parameter gradients
                     optimizer.zero_grad()
-                    
+
                     # Forward pass
                     logits = model(input_ids, attention_mask)
                     loss = criterion(logits, labels.float())
-                    
+
                     # Backward pass and optimization
                     loss.backward()
                     optimizer.step()
-                    
+
                     # Update training loss
                     train_loss += loss.item()
-                    #train_bar.set_postfix({'training_loss': '{:.3f}'.format(loss.item()/len(batch))})
-                
+                    # train_bar.set_postfix({'training_loss': '{:.3f}'.format(loss.item()/len(batch))})
+
                 # Average training loss
                 avg_train_loss = train_loss / len(train_loader)
-                
-                print(f'Epoch {epoch+1}/{6} | Train Loss: {avg_train_loss}')
-                
+
+                print(f"Epoch {epoch+1}/{6} | Train Loss: {avg_train_loss}")
+
                 # Validation
                 val_loss = 0.0
                 model.eval()
-                
+
                 with torch.no_grad():
                     for batch in val_loader:
                         input_ids, attention_mask, labels = batch
@@ -280,23 +297,26 @@ class SentenceBasedSlotExtractor:
                         attention_mask = attention_mask.to(device)
                         labels = labels.to(device)
 
-                        
                         # Forward pass
                         logits = model(input_ids, attention_mask)
                         loss = criterion(logits, labels.float())
-                        
+
                         val_loss += loss.item()
-                        #val_bar.set_postfix({'validation_loss': '{:.3f}'.format(loss.item()/len(batch))})
-                        
+                        # val_bar.set_postfix({'validation_loss': '{:.3f}'.format(loss.item()/len(batch))})
+
                 # Average validation loss
                 avg_val_loss = val_loss / len(val_loader)
-                print(f'Epoch {epoch+1}/{6} | Validation Loss: {avg_val_loss}')
+                print(f"Epoch {epoch+1}/{6} | Validation Loss: {avg_val_loss}")
                 if avg_val_loss < best_val_loss:
                     best_val_loss = avg_val_loss
-                    torch.save(model.state_dict(), f'checkpoint_epoch_{epoch+1}.pt')
+                    torch.save(model.state_dict(), f"checkpoint_epoch_{epoch+1}.pt")
 
         def load_and_test_model(model, model_pth, test_loader, mlb):
-            device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+            device = (
+                torch.device("cuda")
+                if torch.cuda.is_available()
+                else torch.device("cpu")
+            )
             model.to(device)
             all_preds = []
             all_labels = []
@@ -307,7 +327,7 @@ class SentenceBasedSlotExtractor:
             # Disable gradient computation
             with torch.no_grad():
                 # Initialize tqdm progress bar for Test
-                test_bar = tqdm(test_loader, desc='Test')
+                test_bar = tqdm(test_loader, desc="Test")
 
                 for batch in test_bar:
                     input_ids, attention_mask, labels = batch
@@ -319,7 +339,7 @@ class SentenceBasedSlotExtractor:
                     logits = model(input_ids, attention_mask)
 
                     # Get the predicted labels
-                    #_, preds = torch.max(logits, dim=1)
+                    # _, preds = torch.max(logits, dim=1)
 
                     # Move preds and labels to CPU for further evaluation (if using GPU)
                     preds = logits.cpu().numpy()
@@ -328,36 +348,50 @@ class SentenceBasedSlotExtractor:
                     # Extend the list of predictions and labels
                     all_preds.extend(preds)
                     all_labels.extend(labels)
-            threshold = 0.50
+            thresholds = [
+                0.61,
+                0.51,
+                0.51,
+                0.49,
+                0.48,
+                0.51,
+                0.55,
+                0.55,
+                0.56,
+                0.59,
+                0.55,
+                0.51,
+                0.56,
+                0.58,
+                0.6,
+                0.56,
+                0.57,
+                0.48,
+                0.57,
+                0.57,
+                0.57,
+                0.46,
+                0.47,
+                0.51,
+            ]
             all_preds_binary = []
             for all_pred in all_preds:
                 local_pred = []
-                for old_local_pred in all_pred:
+                for old_local_pred, threshold in zip(all_pred, thresholds):
                     binary_local_pred = (old_local_pred > threshold).astype(int)
                     local_pred.append(binary_local_pred)
                 all_preds_binary.append(local_pred)
 
-            confusion_matrices = mcm(all_labels, all_preds_binary)
-            print(classification_report(all_labels, all_preds_binary, target_names=mlb.classes_))
+            # SentenceBasedSlotExtractor.Utils.find_optimal_thresholds(np.array(all_labels), np.array(all_preds))
+            print(
+                classification_report(
+                    all_labels,
+                    all_preds_binary,
+                    target_names=mlb.classes_,
+                    zero_division=1,
+                )
+            )
 
-            # Plotting
-            n_labels = confusion_matrices.shape[0]
-            fig, axes = plt.subplots(n_labels, 1, figsize=(5, 5 * n_labels))
-
-            for i, (cm, ax) in enumerate(zip(confusion_matrices, axes)):
-                im = ax.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
-                ax.figure.colorbar(im, ax=ax)
-                ax.set(title=mlb.classes_[i], 
-                    ylabel='True label',
-                    xlabel='Predicted label',
-                    xticks=np.arange(cm.shape[1]),
-                    yticks=np.arange(cm.shape[0]),
-                    xticklabels=['0', '1'], yticklabels=['0', '1'])
-
-            plt.tight_layout()
-            plt.show()
-
-    
         def train():
             # Create dialogues dataset'
             dataset = SentenceBasedSlotExtractor.SlotFillingDataset()
@@ -368,16 +402,57 @@ class SentenceBasedSlotExtractor:
             # Create the labelled training data
             train_data = dataset.create_labelled_data(dataset.train_dataset)
             # get train data loader
-            train_loader, mlb, labels = dataset.create_bert_tokenized_slot_label_loader(train_data)
+            train_loader, mlb, labels = dataset.create_bert_tokenized_slot_label_loader(
+                train_data
+            )
             # get val data
             val_data = dataset.create_labelled_data(dataset.val_dataset)
             # get val data loader
-            val_loader, _, _ = dataset.create_bert_tokenized_slot_label_loader(labelled_dataset=val_data, mlb=mlb)
+            val_loader, _, _ = dataset.create_bert_tokenized_slot_label_loader(
+                labelled_dataset=val_data, mlb=mlb
+            )
             # create model
             model = SentenceBasedSlotExtractor.SlotFillingModel(len(labels))
-            #train model
-            SentenceBasedSlotExtractor.Utils.train_model(model, train_loader, val_loader)
-                
+            # train model
+            SentenceBasedSlotExtractor.Utils.train_model(
+                model, train_loader, val_loader
+            )
+
+        def find_optimal_thresholds(y_true, y_pred_probs):
+            """
+            Finds the optimal threshold for each label in a multi-label classification.
+
+            :param y_true: True binary labels in binary indicator format.
+            :param y_pred_probs: Predicted probabilities for each label.
+            :return: A list of optimal thresholds for each label.
+            """
+            num_labels = y_true.shape[1]
+            optimal_thresholds = [0.5] * num_labels
+
+            for label in range(num_labels):
+                best_threshold = 0.5
+                best_score = 0.0
+
+                for threshold in np.arange(0.0, 1.01, 0.01):
+                    # Apply the threshold
+                    y_pred = (y_pred_probs[:, label] > threshold).astype(int)
+                    # Calculate the score
+                    score = f1_score(
+                        y_true[:, label], y_pred, average="binary", zero_division=1
+                    )
+                    # Update the best threshold if needed
+                    if score > best_score:
+                        best_score = score
+                        best_threshold = threshold
+
+                optimal_thresholds[label] = best_threshold
+
+            print("####################")
+            print("Optimal thresholds:", optimal_thresholds)
+            print("Best F1 score:", best_score)
+            print("####################")
+            return optimal_thresholds
+
 
 class SpanBasedSlotExtractor:
     class SlotFillingDataset:
@@ -619,7 +694,7 @@ class SpanBasedSlotExtractor:
             )
             dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size)
             return dataloader
-    
+
     class SlotFillingModel:
         def __init__(
             self,
@@ -1010,7 +1085,11 @@ class SpanBasedSlotExtractor:
                             actual_span = utterance[span_start:span_end]
 
                             # Storing unique slot value and span tuples
-                            slot_span_tuple = (act_slot_name, act_slot_value, actual_span)
+                            slot_span_tuple = (
+                                act_slot_name,
+                                act_slot_value,
+                                actual_span,
+                            )
                             if slot_span_tuple not in extracted_data:
                                 extracted_data.append(slot_span_tuple)
 
@@ -1027,7 +1106,8 @@ class SpanBasedSlotExtractor:
                 if slot_value != actual_span:
                     mismatched_slot_values.append([slot_name, slot_value, actual_span])
             mismatched_slot_values = pd.DataFrame(
-                mismatched_slot_values, columns=["slot_name", "slot_value", "actual_span"]
+                mismatched_slot_values,
+                columns=["slot_name", "slot_value", "actual_span"],
             )
             return mismatched_slot_values
 
@@ -1092,7 +1172,9 @@ class SpanBasedSlotExtractor:
                         standardized_span.split()[0], standardized_span.split()[0]
                     )
                     # uppercase the second word
-                    standardized_span = partial + " " + standardized_span.split()[1].upper()
+                    standardized_span = (
+                        partial + " " + standardized_span.split()[1].upper()
+                    )
                     return standardized_span
                 else:
                     return standardized_span
@@ -1133,13 +1215,19 @@ class SpanBasedSlotExtractor:
             # Create the label2id mapping
             label2id, num_labels = dataset.create_label2id(labelled_data)
             # Create the TensorDataset for training
-            tensor_dataset_train = SpanBasedSlotExtractor.TensorDataset(labelled_data, label2id)
+            tensor_dataset_train = SpanBasedSlotExtractor.TensorDataset(
+                labelled_data, label2id
+            )
             tensor_dataset_train.create_tensors()
             # Create the TensorDataset for validation
-            tensor_dataset_val = SpanBasedSlotExtractor.TensorDataset(labelled_data_val, label2id)
+            tensor_dataset_val = SpanBasedSlotExtractor.TensorDataset(
+                labelled_data_val, label2id
+            )
             tensor_dataset_val.create_tensors()
             # Create the TensorDataset for test
-            tensor_dataset_test = SpanBasedSlotExtractor.TensorDataset(labelled_data_test, label2id)
+            tensor_dataset_test = SpanBasedSlotExtractor.TensorDataset(
+                labelled_data_test, label2id
+            )
             tensor_dataset_test.create_tensors()
             # Create the dataloader for training
             train_dataloader = tensor_dataset_train.create_dataloader()
@@ -1182,13 +1270,19 @@ class SpanBasedSlotExtractor:
             # Create the label2id mapping
             label2id, num_labels = dataset.create_label2id(labelled_data)
             # Create the TensorDataset for training
-            tensor_dataset_train = SpanBasedSlotExtractor.TensorDataset(labelled_data, label2id)
+            tensor_dataset_train = SpanBasedSlotExtractor.TensorDataset(
+                labelled_data, label2id
+            )
             tensor_dataset_train.create_tensors()
             # Create the TensorDataset for validation
-            tensor_dataset_val = SpanBasedSlotExtractor.TensorDataset(labelled_data_val, label2id)
+            tensor_dataset_val = SpanBasedSlotExtractor.TensorDataset(
+                labelled_data_val, label2id
+            )
             tensor_dataset_val.create_tensors()
             # Create the TensorDataset for test
-            tensor_dataset_test = SpanBasedSlotExtractor.TensorDataset(labelled_data_test, label2id)
+            tensor_dataset_test = SpanBasedSlotExtractor.TensorDataset(
+                labelled_data_test, label2id
+            )
             tensor_dataset_test.create_tensors()
             # Create the dataloader for training
             train_dataloader = tensor_dataset_train.create_dataloader()
@@ -1268,13 +1362,19 @@ class SpanBasedSlotExtractor:
             # Create the label2id mapping
             label2id, num_labels = dataset.create_label2id(labelled_data)
             # Create the TensorDataset for training
-            tensor_dataset_train = SpanBasedSlotExtractor.TensorDataset(labelled_data, label2id)
+            tensor_dataset_train = SpanBasedSlotExtractor.TensorDataset(
+                labelled_data, label2id
+            )
             tensor_dataset_train.create_tensors()
             # Create the TensorDataset for validation
-            tensor_dataset_val = SpanBasedSlotExtractor.TensorDataset(labelled_data_val, label2id)
+            tensor_dataset_val = SpanBasedSlotExtractor.TensorDataset(
+                labelled_data_val, label2id
+            )
             tensor_dataset_val.create_tensors()
             # Create the TensorDataset for test
-            tensor_dataset_test = SpanBasedSlotExtractor.TensorDataset(labelled_data_test, label2id)
+            tensor_dataset_test = SpanBasedSlotExtractor.TensorDataset(
+                labelled_data_test, label2id
+            )
             tensor_dataset_test.create_tensors()
             # Create the dataloader for training
             train_dataloader = tensor_dataset_train.create_dataloader()
@@ -1354,12 +1454,12 @@ class SpanBasedSlotExtractor:
             # Fraction of values that were parsed correctly
             print(f"Value Accuracy: {num_labels_correct/num_labels_total}")
             # Fraction of slots that were filled correctly
-            print(f"Slot/Value Accuracy: {num_slots_filled_correct/num_slots_filled_total}")
+            print(
+                f"Slot/Value Accuracy: {num_slots_filled_correct/num_slots_filled_total}"
+            )
 
 
 if __name__ == "__main__":
-    
-    
     # Create dialogues dataset'
     dataset = SentenceBasedSlotExtractor.SlotFillingDataset()
     # Load the dataset
@@ -1368,20 +1468,27 @@ if __name__ == "__main__":
     dataset.get_relevant_data({"hotel", "restaurant", "booking", "general"})
     # Create the labelled training data
     train_data = dataset.create_labelled_data(dataset.train_dataset)
-    with open('mlb.pkl', 'rb') as file:
+    with open("mlb.pkl", "rb") as file:
         mlb = pickle.load(file)
     # get train data loader
-    train_loader, _ , _ = dataset.create_bert_tokenized_slot_label_loader(train_data, mlb=mlb)
+    train_loader, _, _ = dataset.create_bert_tokenized_slot_label_loader(
+        train_data, mlb=mlb
+    )
     # get val data
     val_data = dataset.create_labelled_data(dataset.val_dataset)
     # get val data loader
-    val_loader, _, labels = dataset.create_bert_tokenized_slot_label_loader(labelled_dataset=val_data, mlb=mlb)
+    val_loader, _, labels = dataset.create_bert_tokenized_slot_label_loader(
+        labelled_dataset=val_data, mlb=mlb
+    )
     # create labelled test data
     test_data = dataset.create_labelled_data(dataset.test_dataset)
     # get test data loader
-    test_loader, _, _ = dataset.create_bert_tokenized_slot_label_loader(labelled_dataset=test_data, mlb=mlb)
+    test_loader, _, _ = dataset.create_bert_tokenized_slot_label_loader(
+        labelled_dataset=test_data, mlb=mlb
+    )
     # create model
-    model = SentenceBasedSlotExtractor.SlotFillingModel(len(labels))
+    model = SentenceBasedSlotExtractor.SlotFillingModel(len(mlb.classes_))
     # test model
-    SentenceBasedSlotExtractor.Utils.load_and_test_model(model, "sent_checkpoint_epoch_7.pt", test_loader, mlb)
-    
+    SentenceBasedSlotExtractor.Utils.load_and_test_model(
+        model, "sent_checkpoint_epoch_10.pt", test_loader, mlb
+    )
