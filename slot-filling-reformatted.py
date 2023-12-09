@@ -639,6 +639,7 @@ class SlotValueParser:
 
         # dictionary to convert strings to number representations
         number_dict = {
+            "zero": "0",
             "one": "1",
             "two": "2",
             "three": "3",
@@ -681,8 +682,8 @@ class SlotValueParser:
                 partial = number_dict.get(
                     standardized_span.split()[0], standardized_span.split()[0]
                 )
-                # uppercase the second word
-                standardized_span = partial + " " + standardized_span.split()[1].upper()
+                # keep the distance between number and second word e.g.'9 pm': '9 PM'
+                standardized_span = partial + " " + standardized_span.split()[1]
                 return standardized_span
             else:
                 return standardized_span
@@ -696,8 +697,53 @@ class SlotValueParser:
             "dontcare",
             "dontcare",
             "don't care",
+            "do not care",
+            "don't really care",
+            "doesnt matter",
+            "doesn't matter",
+            "does not matter",
+            "doesn't really matter",
+            "not really",
+            "no preference",
+            "no particular",
+            "not particular",
+            "either one is fine",
+            "either is fine",
+            "don't have a preference",
+            "do not have a preference",
         ]:
             return "dontcare"
+        
+        #if slot_name == "bookday":
+        #    s = standardized_span.split()
+        #    if actual_span.strip().islower(): #'Friday': 'friday'
+        #        return standardized_span.capitalize()
+        #if slot_name == "choice":
+        #    s = standardized_span.split()
+        #    if actual_span.strip().islower(): #'Both': 'both'
+        #        return standardized_span.capitalize()
+        #if slot_name == "area":
+        #    s = standardized_span.split()
+        #    if actual_span.strip().islower(): #'East': 'east'
+        #        return standardized_span.capitalize()
+        #if slot_name == "food":
+        #    s = standardized_span.split()
+        #    if actual_span.strip().islower(): #'Italian': 'italian'
+        #        return standardized_span.capitalize()
+        
+        if slot_name == "name":
+            s = standardized_span.split()
+            if actual_span.islower(): #or if s[1][0].isupper(): #for single case: name 'The Allenbell':'the Allenbell'
+                for i in range(len(s)): #name 'Nandos': 'nandos', name 'Lensfield Hotel': 'lensfield hotel'
+                    s[i] = s[i].capitalize()
+                return ' '.join(s)
+            
+        #each word in address always capitalized regardless of actual_span value
+        if slot_name == "address":
+            s = standardized_span.split()
+            for i in range(len(s)):
+                s[i] = s[i].capitalize()
+            return' '.join(s)
 
         # if span contains 'same' return the relevant value from dialogue history
         if "same" in standardized_span.split() and dialogue_slot_memory is not None:
@@ -757,7 +803,7 @@ def train_and_test_model():
     print(res)
 
 
-def load_and_query_model(query, model_path="checkpoint_epoch_3.pt"):
+def load_and_query_model(query, model_path="/kaggle/input/checkpoint/checkpoint_epoch_4.pt"):
     # Create dialogues dataset'
     dataset = SlotFillingDataset()
     # Load the dataset
@@ -832,6 +878,7 @@ def test_span_to_slot_value_mapping():
     fix_count = 0
     total_mismatched_slot_values = len(mismatched_slot_values)
 
+    fixed = []
     for slot_name, slot_value, actual_span in mismatched_slot_values.values:
         # convert the actual span to the slot value
         fixed_span = parser.convert_span_to_slot_value(slot_name, actual_span)
@@ -840,11 +887,17 @@ def test_span_to_slot_value_mapping():
                 f"Corrected slot value for '{slot_name}': '{actual_span}' -> '{fixed_span}'"
             )
             fix_count += 1
+            fixed.append(actual_span)
     print(f"Fixed {fix_count}/{total_mismatched_slot_values} slot values.")
+    print()
+    print("To Fix:")
+    for slot_name, slot_value, actual_span in mismatched_slot_values.values:
+        if actual_span not in fixed:
+           print(f"'{slot_name}'    '{slot_value}': '{actual_span}'") 
 
 
 def test_full_dialogue_system(
-    path_to_model_checkpoint="checkpoint_epoch_3.pt", print_output=False
+    path_to_model_checkpoint="/kaggle/input/checkpoint/checkpoint_epoch_4.pt", print_output=False
 ):
     # Create dialogues dataset'
     dataset = SlotFillingDataset()
@@ -949,4 +1002,5 @@ def test_full_dialogue_system(
 
 
 if __name__ == "__main__":
-    test_full_dialogue_system()
+    #test_full_dialogue_system()
+    test_span_to_slot_value_mapping()
