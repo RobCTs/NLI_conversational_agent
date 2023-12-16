@@ -2461,6 +2461,7 @@ def Information_to_be_retrieved_Prediction(
     to_be_retrieved = agent_to_be_retrieved_testing_suite.predict_only_last_dialog_item(
         dialog_item_dataset=other_features_from_dialogue_history3["dialogue_history"],
     )
+    to_be_retrieved = list(to_be_retrieved)
     return to_be_retrieved
 
 
@@ -2480,12 +2481,13 @@ def Agent_Move_Prediction(
         dialog_item_dataset=other_features_from_dialogue_history4["dialogue_history"],
         to_be_provided_gt=retrieved_information_filtered,
     )
+    agent_dialogue_acts = list(agent_dialogue_acts)
 
     # convert dict to 'key:value' list
+
     extracted_information = [
-        f"{key}:{value}"
-        for act_list in extracted_information.values()
-        for key, value in act_list
+        f"{act_list[0]}:{act_list[1]}"
+        for act_list in extracted_information
     ]
 
     input_text = " ".join(user_dialogue_acts + extracted_information)
@@ -2496,7 +2498,7 @@ def Agent_Move_Prediction(
     to_be_requested = ToBeProvided.query_model(
         input_text, to_be_provided_testing_suite, tokenizer, mlb, device, threshold=0.5
     )
-
+    
     to_be_requested = [item for tup in to_be_requested for item in tup]
     return {
         "agent_dialogue_acts": agent_dialogue_acts,
@@ -3264,9 +3266,13 @@ def eval_fn(
 def manual_query_function():
     # Initialize the necessary components and models
     dialogue_history_for_slot_filling = DialogSlotMemory()
-    dialogue_history_for_da_prediction = []
-    dialogue_history_for_agent_move_prediction = []
-    previous_da_dialog_history_ids = []
+    # Keep track of Dialog Items for Dialogue Act Prediction:
+    dialogue_history_for_da_prediction: typing.List[DialogItem] = []
+    previous_da_dialog_history_ids: typing.List[DialogItemIdentifier] = []
+
+    # Keep Track of Dialog Items for Agent Slots to Be Retrieved Prediction:
+    dialogue_history_for_agent_move_prediction: typing.List[DialogItemForAgentMove] = []
+    previous_agent_move_dialog_history_ids: typing.List[DialogItemIdentifier] = []
 
     while True:
         # Input from the user
@@ -3274,10 +3280,25 @@ def manual_query_function():
         if user_input.lower() == "exit":
             break
 
-        # Process the user input
+        # --- USER
+
+        # Dialogue Act Prediction
         dialogue_acts_predicted = Dialogue_Act_Prediction(
-            user_input, {"dialogue_history": dialogue_history_for_da_prediction}
+            user_input, {"dialogue_history": dialogue_history_for_da_prediction, "speaker": "User", "id_dialogue": "manual_query", "turn_id": len(dialogue_history_for_da_prediction), "previous_dialogue_history_ids": previous_da_dialog_history_ids}
         )
+        dialogue_acts_predicted = list(dialogue_acts_predicted)
+
+        # Update memory
+        DialogActModel.add_dialogue_items_to_dialogue_history(
+            utterance=user_input, speaker="User", dialog_history=dialogue_history_for_da_prediction, dialog_acts=dialogue_acts_predicted, id_dialog="manual_query", order_in_dialog=len(dialogue_history_for_da_prediction), previous_dialog_history_ids=previous_da_dialog_history_ids
+        )
+
+        add_dialogue_items_to_dialogue_history_for_agent_move(
+            utterance=user_input, speaker="User", dialog_acts=dialogue_acts_predicted, to_be_retrieved_gt=[], id_dialog="manual_query", order_in_dialog=len(dialogue_history_for_agent_move_prediction), previous_dialog_history_ids=previous_agent_move_dialog_history_ids, dialog_history=dialogue_history_for_agent_move_prediction
+        )
+
+        # Slot Filling
+
         extracted_information = Extract_and_Categorize_Spans(
             user_input,
             dialogue_acts_predicted,
@@ -3297,6 +3318,7 @@ def manual_query_function():
         agent_move_predicted = Agent_Move_Prediction(
             dialogue_acts_predicted,
             extracted_information,
+            agent_to_be_retrieved_predicted,
             {"dialogue_history": dialogue_history_for_agent_move_prediction},
         )
 
@@ -3308,7 +3330,7 @@ def manual_query_function():
             to_be_retrieved_gt=agent_to_be_retrieved_predicted,
             id_dialog="manual_query",
             order_in_dialog=len(dialogue_history_for_da_prediction),
-            previous_dialog_history_ids=previous_da_dialog_history_ids,
+            previous_dialog_history_ids=previous_agent_move_dialog_history_ids,
             dialog_history=dialogue_history_for_agent_move_prediction,
         )
 
