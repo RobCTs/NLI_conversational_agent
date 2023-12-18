@@ -3308,6 +3308,8 @@ def manual_query_function():
         # update the dialogue history for slot filling
         for frame in extracted_information:
             dialogue_history_for_slot_filling.add_slot(frame[0], frame[1])
+        
+        # Agent: Simulate the agent's response based on the prediction
 
         # Simulate the agent's response based on the prediction
         agent_to_be_retrieved_predicted = Information_to_be_retrieved_Prediction(
@@ -3315,6 +3317,7 @@ def manual_query_function():
             extracted_information,
             {"dialogue_history": dialogue_history_for_agent_move_prediction},
         )
+
         agent_move_predicted = Agent_Move_Prediction(
             dialogue_acts_predicted,
             extracted_information,
@@ -3323,10 +3326,19 @@ def manual_query_function():
         )
 
         # Update the dialogue history (after prediction)
+        DialogActModel.add_dialogue_items_to_dialogue_history(
+            utterance="",
+            speaker="Agent",
+            dialog_history=dialogue_history_for_da_prediction,
+            dialog_acts=agent_move_predicted["agent_dialogue_acts"],
+            id_dialog="manual_query",
+            order_in_dialog=len(dialogue_history_for_da_prediction),
+            previous_dialog_history_ids=previous_da_dialog_history_ids,
+        )
         add_dialogue_items_to_dialogue_history_for_agent_move(
-            utterance=user_input,
-            speaker="User",
-            dialog_acts=dialogue_acts_predicted,
+            utterance="",
+            speaker="Agent",
+            dialog_acts=agent_move_predicted["agent_dialogue_acts"],
             to_be_retrieved_gt=agent_to_be_retrieved_predicted,
             id_dialog="manual_query",
             order_in_dialog=len(dialogue_history_for_da_prediction),
