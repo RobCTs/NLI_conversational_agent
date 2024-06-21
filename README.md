@@ -1,4 +1,16 @@
-# emai_nli_project
+# NLI_project
+A conversational agent trained on Restaurant and Hotel domains (Erasmus Mundus EMAI project)
+
+## Team
+
+| **Name / Surname** | **GitHub** |
+| :---: | :---: | :---: |
+| `Camille` | [![name](https://github.com/b-rbmp/NexxGate/blob/main/docs/logos/github.png)](https://github.com/CLendering) |
+| `Bernardo` | [![name](https://github.com/b-rbmp/NexxGate/blob/main/docs/logos/github.png)](https://github.com/b-rbmp) |
+| `Roberta` | [![name](https://github.com/b-rbmp/NexxGate/blob/main/docs/logos/github.png)](https://github.com/RobCTs) |
+| `Nazanin` | [![name](https://github.com/b-rbmp/NexxGate/blob/main/docs/logos/github.png)](https://github.com/Naominickels) |
+
+
 ## Implementation of the core functionalities of a CA
   • Domain identification/ Dialog act prediction
 
