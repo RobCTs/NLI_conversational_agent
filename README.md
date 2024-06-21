@@ -3,8 +3,8 @@ A conversational agent trained on Restaurant and Hotel domains (Erasmus Mundus E
 
 ## Team
 
-| **Name | Surname** | **GitHub** |
-| :---: | :---: | :---: |
+| **Name | **GitHub** |
+| :---: | :---: |
 | `Camille` | [![name](https://github.com/b-rbmp/NexxGate/blob/main/docs/logos/github.png)](https://github.com/CLendering) |
 | `Bernardo` | [![name](https://github.com/b-rbmp/NexxGate/blob/main/docs/logos/github.png)](https://github.com/b-rbmp) |
 | `Roberta` | [![name](https://github.com/b-rbmp/NexxGate/blob/main/docs/logos/github.png)](https://github.com/RobCTs) |
